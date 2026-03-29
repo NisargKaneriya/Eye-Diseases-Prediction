@@ -6,22 +6,28 @@ import tensorflow as tf
 import numpy as np
 from PIL import Image, UnidentifiedImageError 
 import io
+import requests
 
 app = Flask(__name__)
 CORS(app)
 
 # 1. CONFIGURATION
-MODEL_PATH = 'final_eye_disease_model (1).h5'
+
+MODEL_PATH = "model.tflite"
 CONFIDENCE_THRESHOLD = 0.75 
 
-print(f"Loading model from {MODEL_PATH}...")
 try:
-    model = tf.keras.models.load_model(MODEL_PATH)
-    print("Model loaded successfully!")
+    interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
+    interpreter.allocate_tensors()
+    
+    input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
+
+    print("TFLite model loaded successfully!")
 except Exception as e:
     print(f"Error loading model: {e}")
-    model = None
-
+    interpreter = None
+    
 CLASS_NAMES = ['Cataract', 'Diabetic Retinopathy', 'Glaucoma', 'Normal']
 
 def preprocess_image(image_bytes):
@@ -46,7 +52,7 @@ def preprocess_image(image_bytes):
 
 @app.route('/predict', methods=['POST'])
 def predict():
-    if not model:
+    if not interpreter:
         return jsonify({'error': 'Model not loaded'}), 500
         
     if 'file' not in request.files:
@@ -60,7 +66,10 @@ def predict():
         processed_img = preprocess_image(file.read())
         
         # 2. Predict
-        predictions = model.predict(processed_img)
+        interpreter.set_tensor(input_details[0]['index'], processed_img.astype(np.float32))
+        interpreter.invoke()
+
+        predictions = interpreter.get_tensor(output_details[0]['index'])
         
         # 3. Analyze Results
         predicted_index = np.argmax(predictions[0])
@@ -94,12 +103,6 @@ def predict():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# @app.route("/")
-# def home():
-#     return "Backend is running"
-
-# if __name__ == '__main__':
-#     app.run(host='0.0.0.0', port=8000, debug=True)
 @app.route("/")
 def home():
     return "Backend is running"

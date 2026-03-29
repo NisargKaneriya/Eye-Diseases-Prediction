@@ -1,0 +1,75 @@
+# Python cache
+
+**pycache**/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+
+venv/
+env/
+ENV/
+.venv/
+
+# Mac system files
+
+.DS_Store
+
+# Environment variables
+
+.env
+
+# Logs
+
+*.log
+
+# Jupyter Notebook checkpoints
+
+.ipynb_checkpoints/
+
+# Python build files
+
+build/
+dist/
+*.egg-info/
+
+# ML / Model files (large files)
+
+*.h5
+*.hdf5
+*.pt
+*.pth
+*.joblib
+*.pickle
+*.pkl
+
+# Dataset files
+
+data/
+datasets/
+
+# Temporary files
+
+*.tmp
+*.temp
+
+# VS Code settings
+
+.vscode/
+
+# Streamlit cache
+
+.streamlit/
+
+# Testing cache
+
+.pytest_cache/
+
+# Coverage reports
+
+.coverage
+htmlcov/
+
+# Node modules (if frontend later)
+
+node_modules/

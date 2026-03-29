@@ -1,84 +1,104 @@
 import os
-
+import io
+import requests
+import numpy as np
+from PIL import Image, UnidentifiedImageError
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import tensorflow as tf
-import numpy as np
-from PIL import Image, UnidentifiedImageError 
-import io
-import requests
 
 app = Flask(__name__)
 CORS(app)
 
-# 1. CONFIGURATION
-
-MODEL_PATH = "model.tflite"
-CONFIDENCE_THRESHOLD = 0.75 
-
-try:
-    interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
-    interpreter.allocate_tensors()
-    
-    input_details = interpreter.get_input_details()
-    output_details = interpreter.get_output_details()
-
-    print("TFLite model loaded successfully!")
-except Exception as e:
-    print(f"Error loading model: {e}")
-    interpreter = None
-    
+# ─────────────────────────────────────────────
+# CONFIGURATION
+# ─────────────────────────────────────────────
+CONFIDENCE_THRESHOLD = 0.75
+MODEL_PATH = "final_eye_disease_model.h5"
+HF_URL = "https://huggingface.co/Nik-23/eye-disease-detection/resolve/main/final_eye_disease_model%20(1).h5"
 CLASS_NAMES = ['Cataract', 'Diabetic Retinopathy', 'Glaucoma', 'Normal']
 
+
+# ─────────────────────────────────────────────
+# DOWNLOAD MODEL FROM HUGGINGFACE
+# ─────────────────────────────────────────────
+def download_model():
+    if not os.path.exists(MODEL_PATH):
+        print("Downloading model from HuggingFace...")
+        try:
+            response = requests.get(HF_URL, stream=True)
+            response.raise_for_status()
+            with open(MODEL_PATH, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            print("Model downloaded successfully!")
+        except Exception as e:
+            print(f"Failed to download model: {e}")
+    else:
+        print("Model already exists, skipping download.")
+
+
+# ─────────────────────────────────────────────
+# LOAD MODEL
+# ─────────────────────────────────────────────
+download_model()
+
+try:
+    model = tf.keras.models.load_model(MODEL_PATH)
+    print("Model loaded successfully!")
+except Exception as e:
+    print(f"Error loading model: {e}")
+    model = None
+
+
+# ─────────────────────────────────────────────
+# IMAGE PREPROCESSING
+# ─────────────────────────────────────────────
 def preprocess_image(image_bytes):
     """
-    Handles multiple formats: JPG, PNG, WEBP, BMP, PPM, TIFF
+    Accepts JPG, PNG, WEBP, BMP, PPM, TIFF formats.
+    Resizes to 224x224 and normalizes pixel values.
     """
     try:
-        # Image.open automatically detects the format (JPG, PNG, WEBP, PPM, etc.)
         img = Image.open(io.BytesIO(image_bytes))
-        
-        # Convert to RGB (Crucial for PNGs/WebPs with transparency or PPMs)
         img = img.convert('RGB')
-        
-        img = img.resize((224, 224)) 
-        img_array = np.array(img)
-        img_array = img_array / 255.0
+        img = img.resize((224, 224))
+        img_array = np.array(img) / 255.0
         img_array = np.expand_dims(img_array, axis=0)
         return img_array
     except UnidentifiedImageError:
-        # This runs if the file is not a valid image (e.g., PDF, Text file)
-        raise ValueError("Invalid image format. Supported formats: JPG, PNG, WEBP, PPM, BMP, TIFF.")
+        raise ValueError("Invalid image format. Supported: JPG, PNG, WEBP, PPM, BMP, TIFF.")
+
+
+# ─────────────────────────────────────────────
+# ROUTES
+# ─────────────────────────────────────────────
+@app.route("/")
+def home():
+    return "Eye Disease Detection Backend is running!"
+
 
 @app.route('/predict', methods=['POST'])
 def predict():
-    if not interpreter:
-        return jsonify({'error': 'Model not loaded'}), 500
-        
+    if not model:
+        return jsonify({'error': 'Model not loaded. Please try again later.'}), 500
+
     if 'file' not in request.files:
         return jsonify({'error': 'No file uploaded'}), 400
-    
-    file = request.files['file']
-    
-    try:
-        # 1. Process
-        # This will now accept .webp, .ppm, .bmp, etc.
-        processed_img = preprocess_image(file.read())
-        
-        # 2. Predict
-        interpreter.set_tensor(input_details[0]['index'], processed_img.astype(np.float32))
-        interpreter.invoke()
 
-        predictions = interpreter.get_tensor(output_details[0]['index'])
-        
-        # 3. Analyze Results
+    file = request.files['file']
+
+    try:
+        processed_img = preprocess_image(file.read())
+
+        predictions = model.predict(processed_img)
+
         predicted_index = np.argmax(predictions[0])
         raw_confidence = float(predictions[0][predicted_index])
-        
-        # Filter Logic
+
         if raw_confidence < CONFIDENCE_THRESHOLD:
             predicted_class = "Unknown / Invalid Image"
-            confidence = raw_confidence 
+            confidence = raw_confidence
             message = "Low confidence. This may not be a retinal scan."
         else:
             predicted_class = CLASS_NAMES[predicted_index]
@@ -86,10 +106,10 @@ def predict():
             message = "Analysis successful."
 
         scores_dict = {
-            class_name: float(score) 
+            class_name: float(score)
             for class_name, score in zip(CLASS_NAMES, predictions[0])
         }
-        
+
         return jsonify({
             'class': predicted_class,
             'confidence': confidence,
@@ -98,15 +118,14 @@ def predict():
         })
 
     except ValueError as ve:
-        # Specific error for bad image formats
         return jsonify({'error': str(ve)}), 400
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route("/")
-def home():
-    return "Backend is running"
 
+# ─────────────────────────────────────────────
+# RUN APP
+# ─────────────────────────────────────────────
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8000))
     app.run(host='0.0.0.0', port=port)
